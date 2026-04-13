@@ -1,147 +1,106 @@
-// ===== 기본 세팅 =====
+import * as THREE from "https://cdn.skypack.dev/three@0.158";
+
+// ===== 기본 =====
 const scene = new THREE.Scene();
 
-scene.background = new THREE.Color(0x0a0a0a);
-scene.fog = new THREE.Fog(0x000000, 5, 25);
-
-const camera = new THREE.PerspectiveCamera(
-  75,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  1000
+const camera = new THREE.OrthographicCamera(
+  -1, 1, 1, -1, 0.1, 10
 );
-camera.position.z = 5;
+camera.position.z = 1;
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// ===== 텍스처 로드 =====
+// ===== 텍스처 =====
 const loader = new THREE.TextureLoader();
 
-const images = [
-  "./image1.jpg",
-  "./image2.jpg",
-  "./image3.jpg",
-  "./image4.jpg",
-  "./image5.jpg",
-  "./image6.jpg"
-];
+const tex1 = loader.load("./image1.jpg");
+const tex2 = loader.load("./image2.jpg");
 
-const meshes = [];
+// ===== 쉐이더 =====
+const material = new THREE.ShaderMaterial({
+  uniforms: {
+    uTexture1: { value: tex1 },
+    uTexture2: { value: tex2 },
+    uProgress: { value: 0 },
+    uMouse: { value: new THREE.Vector2(0, 0) }
+  },
 
-// ===== 이미지 생성 =====
-images.forEach((img, i) => {
-  const texture = loader.load(img);
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position, 1.0);
+    }
+  `,
 
-  const size = 3 + Math.random() * 1.5;
-  const geometry = new THREE.PlaneGeometry(size, size * 0.75);
+  fragmentShader: `
+    varying vec2 vUv;
 
-  const material = new THREE.MeshBasicMaterial({
-    map: texture,
-    transparent: true,
-  });
+    uniform sampler2D uTexture1;
+    uniform sampler2D uTexture2;
+    uniform float uProgress;
+    uniform vec2 uMouse;
 
-  const mesh = new THREE.Mesh(geometry, material);
+    void main() {
+      vec2 uv = vUv;
 
-  // 🎯 핵심: 연출된 배치
-  mesh.position.z = -i * 5;
+      // 마우스 기반 왜곡
+      float dist = distance(uv, uMouse);
+      uv += (uMouse - uv) * 0.2 * (1.0 - dist);
 
-  if (i % 2 === 0) {
-    mesh.position.x = -1.5;
-  } else {
-    mesh.position.x = 1.5;
-  }
+      // 물결 느낌
+      uv.y += sin(uv.x * 10.0 + uProgress * 5.0) * 0.02;
 
-  mesh.position.y = (Math.random() - 0.5) * 1.5;
+      vec4 img1 = texture2D(uTexture1, uv);
+      vec4 img2 = texture2D(uTexture2, uv);
 
-  scene.add(mesh);
-  meshes.push(mesh);
+      // 전환
+      vec4 final = mix(img1, img2, uProgress);
+
+      gl_FragColor = final;
+    }
+  `
 });
 
-// ===== ✏️ 흰색 드로잉 (병맛 핵심) =====
-const createDrawing = (x, y, z) => {
-  const points = [];
-
-  points.push(new THREE.Vector3(-0.5, 0.5, 0));
-  points.push(new THREE.Vector3(0.5, 0.5, 0));
-  points.push(new THREE.Vector3(0.3, 0, 0));
-  points.push(new THREE.Vector3(-0.3, 0, 0));
-  points.push(new THREE.Vector3(-0.5, 0.5, 0));
-
-  const geo = new THREE.BufferGeometry().setFromPoints(points);
-
-  const mat = new THREE.LineBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.9,
-  });
-
-  const line = new THREE.Line(geo, mat);
-
-  line.position.set(x, y, z);
-
-  scene.add(line);
-  return line;
-};
-
-const drawings = [];
-
-meshes.forEach((mesh, i) => {
-  const d = createDrawing(
-    mesh.position.x + (Math.random() > 0.5 ? 1 : -1),
-    mesh.position.y + 0.5,
-    mesh.position.z + 0.5
-  );
-  drawings.push(d);
-});
+// ===== 화면 =====
+const geometry = new THREE.PlaneGeometry(2, 2);
+const mesh = new THREE.Mesh(geometry, material);
+scene.add(mesh);
 
 // ===== 마우스 =====
-let mouseX = 0;
-let mouseY = 0;
-
-document.addEventListener("mousemove", (e) => {
-  mouseX = (e.clientX / window.innerWidth - 0.5) * 2;
-  mouseY = (e.clientY / window.innerHeight - 0.5) * 2;
+window.addEventListener("mousemove", (e) => {
+  material.uniforms.uMouse.value.x = e.clientX / window.innerWidth;
+  material.uniforms.uMouse.value.y = 1 - e.clientY / window.innerHeight;
 });
 
-// ===== 스크롤 =====
-let scrollY = 0;
+// ===== 스페이스 HOLD =====
+let holding = false;
 
-window.addEventListener("wheel", (e) => {
-  scrollY += e.deltaY * 0.002;
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Space") holding = true;
+});
+
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Space") holding = false;
 });
 
 // ===== 애니메이션 =====
 function animate() {
   requestAnimationFrame(animate);
 
-  // 카메라 부드럽게 이동
-  camera.position.x += (mouseX - camera.position.x) * 0.05;
-  camera.position.y += (-mouseY - camera.position.y) * 0.05;
+  if (holding) {
+    material.uniforms.uProgress.value += 0.02;
+    if (material.uniforms.uProgress.value > 1) {
+      material.uniforms.uProgress.value = 0;
 
-  camera.position.z = 5 + scrollY;
-
-  // 이미지 움직임
-  meshes.forEach((mesh, i) => {
-    mesh.rotation.z += 0.0005;
-    mesh.position.y += Math.sin(Date.now() * 0.001 + i * 2) * 0.0015;
-  });
-
-  // 드로잉 움직임 (병맛 포인트)
-  drawings.forEach((d, i) => {
-    d.rotation.z += 0.01;
-    d.position.x += Math.sin(Date.now() * 0.002 + i) * 0.002;
-  });
+      // 이미지 교체
+      material.uniforms.uTexture1.value = tex2;
+    }
+  }
 
   renderer.render(scene, camera);
 }
 
 animate();
-
-// ===== 반응형 =====
-window.addEventListener("resize", () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-});
